@@ -56,6 +56,7 @@ OpenTelemetry + Jaeger tracing is planned but not yet added — see the note at 
    ```
 
    The API runs on `http://localhost:3000`.
+   Interactive Swagger UI: `http://localhost:3000/docs`.
 
 ## Endpoints
 
