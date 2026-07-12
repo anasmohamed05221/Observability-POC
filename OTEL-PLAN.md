@@ -23,6 +23,12 @@ HTTP POST /orders              (auto)
 
 ## Step 1 — Run Jaeger locally
 
+**First, check ports 16686 and 4318 are actually free** — we already hit a real conflict with
+Postgres on port 5432 from a native install on this machine (`netstat -ano | grep 16686` /
+`grep 4318`, on Windows check with `tasklist /FI "PID eq <pid>"`). If either is taken, map Jaeger
+to different host ports the same way we remapped Postgres to 5433, and adjust the exporter URL
+in Step 3 to match.
+
 Add Jaeger `all-in-one` to `docker-compose.yml` alongside Postgres.
 
 - Port `16686` → Jaeger UI
@@ -35,12 +41,16 @@ Add Jaeger `all-in-one` to `docker-compose.yml` alongside Postgres.
 ## Step 2 — Install OTel packages
 
 ```
+@opentelemetry/api
 @opentelemetry/sdk-node
 @opentelemetry/auto-instrumentations-node
 @opentelemetry/exporter-trace-otlp-http
 @opentelemetry/resources
 @opentelemetry/semantic-conventions
 ```
+
+`@opentelemetry/api` is easy to miss but required separately — it's what gives us `trace.getTracer(...)`
+for the manual spans in Step 5. `sdk-node` alone doesn't export it.
 
 **Done when:** packages installed, no version conflicts.
 
@@ -83,10 +93,21 @@ app logs.
 
 ## Step 4 — Enable Prisma auto-instrumentation
 
-Add `previewFeatures = ["tracing"]` to the `generator client` block in `prisma/schema.prisma`,
-then `npx prisma generate` again.
+**Unverified for our setup — check this first.** `previewFeatures = ["tracing"]` is a Prisma
+5/6-era flag tied to the old `prisma-client-js` query engine binary. We're on **Prisma 7 with
+`@prisma/adapter-pg`** (a different connection architecture — see `src/prisma/prisma.service.ts`),
+and it's not confirmed that flag still does anything, or that Prisma 7 exposes query spans the
+same way.
 
-**Done when:** `db query` spans appear under the HTTP span in Jaeger for `GET /products`.
+Before writing any code: check the installed Prisma version's docs/changelog for how tracing
+works in v7 with driver adapters. If the old preview flag is dead, the fallback is wrapping
+`tx.<model>.<method>(...)` calls manually as part of the `inventory.check` / `order.create` etc.
+spans in Step 5 — which we're already doing, so DB visibility isn't lost even if auto-instrumentation
+for Prisma specifically doesn't pan out.
+
+**Done when:** either `db query` spans appear automatically under the HTTP span in Jaeger for
+`GET /products`, or — if that preview flag doesn't apply to Prisma 7 — confirm manual spans still
+show query timing well enough for Step 5's purposes.
 
 ---
 
@@ -98,7 +119,7 @@ correctly under it).
 
 Order to add them (check the tree in Jaeger after each one before moving to the next):
 
-1. `validate.request` — wraps DTO validation, in the controller or a guard.
+1. `validate.request` — see note below, needs its own approach.
 2. `order.transaction` — wraps the whole `prisma.$transaction(...)` call.
 3. `inventory.check`
 4. `inventory.reserve`
@@ -107,7 +128,29 @@ Order to add them (check the tree in Jaeger after each one before moving to the 
 7. `payment.charge`
 8. `order.confirm`
 
-Pattern for each span:
+**Note on `validate.request` specifically:** we use a *global* `ValidationPipe` (`main.ts`), and
+validation happens automatically before our controller method even runs — there's no line of our
+own code to wrap. A guard or plain "wrap the controller method" approach won't isolate just the
+validation step. Instead, wrap the pipe itself: create a small subclass that overrides `transform()`
+
+```ts
+class TracedValidationPipe extends ValidationPipe {
+  async transform(value: unknown, metadata: ArgumentMetadata) {
+    return tracer.startActiveSpan('validate.request', async (span) => {
+      try {
+        return await super.transform(value, metadata);
+      } finally {
+        span.end();
+      }
+    });
+  }
+}
+```
+
+and register `app.useGlobalPipes(new TracedValidationPipe({ whitelist: true, transform: true }))`
+instead of the plain `ValidationPipe`. This spans exactly the validation call, nothing more.
+
+Pattern for each other span:
 
 ```ts
 await tracer.startActiveSpan('inventory.reserve', async (span) => {
@@ -189,7 +232,7 @@ batch timer fires. Without this hook, the last request before a restart can vani
 |---|---|
 | No traces at all in Jaeger | `tracing.ts` not imported first, or exporter URL wrong |
 | `unknown_service:node` in Jaeger | `service.name` resource attribute not set |
-| No `db query` spans | Missing `previewFeatures = ["tracing"]` in `schema.prisma` |
+| No `db query` spans | Missing `previewFeatures = ["tracing"]` in `schema.prisma` — or, on Prisma 7, that flag may not apply at all (see Step 4) |
 | Manual spans not nested under parent | Used `startSpan` instead of `startActiveSpan` |
 | Span never appears / trace looks stuck | Forgot `span.end()` |
 | Trace missing right after a crash/restart | No graceful shutdown flush (`sdk.shutdown()`) |
