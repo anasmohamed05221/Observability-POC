@@ -66,6 +66,17 @@ export class OrdersService {
     await new Promise((resolve) => setTimeout(resolve, 150));
   }
 
+  async findOne(id: number) {
+    const order = await this.prisma.order.findUnique({
+      where: { id },
+      include: { items: true },
+    });
+    if (!order) {
+      throw new NotFoundException(`Order ${id} not found`);
+    }
+    return order;
+  }
+
   private async confirmOrder(tx: Tx, orderId: number) {
     return tx.order.update({
       where: { id: orderId },
