@@ -111,17 +111,14 @@ instrumentations: [getNodeAutoInstrumentations(), new PrismaInstrumentation()],
 No flag on `PrismaClient` itself is needed either — it attaches by patching `PrismaClient`
 internals globally, same mechanism as the HTTP/Express auto-instrumentations.
 
-**Further finding, checked directly against the actual trace (not assumed):** pulled every span
-name for a `GET /products` trace via Jaeger's API and none contain `prisma` — the DB spans we see
-(`pg.connect`, `pg.query:SELECT ...`, `pg-pool.connect`) come from the **raw `pg` driver
-instrumentation**, already active since Step 3 (Prisma 7's adapter wraps `pg` directly).
-`@prisma/instrumentation` isn't visibly contributing anything on top of that — likely because it
-targets Prisma's old query-engine execution path, which the driver-adapter client (Prisma 7)
-doesn't use. Kept the package installed (harmless, may start working in a future Prisma release)
-but the DB visibility we actually rely on comes from the `pg` instrumentation, not this package.
+**Confirmed working** — `prisma:client:operation`, `prisma:client:db_query`,
+`prisma:client:compile`, `prisma:client:serialize` spans all appear, nested around the lower-level
+`pg.*` spans from the raw driver. Verified on both a `$transaction` write (`POST /orders`) and a
+plain read (`GET /products`). Note: if a trace looks unexpectedly empty right after a restart,
+wait a few seconds for the batch exporter to flush before concluding something's broken.
 
 **Done when:** `db query` spans appear automatically under the HTTP span in Jaeger for
-`GET /products` — confirmed, via `pg.query:SELECT ...` spans.
+`GET /products` — confirmed.
 
 ---
 
