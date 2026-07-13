@@ -16,7 +16,7 @@ Instrumented with OpenTelemetry, traces exported to Jaeger — see [Tracing](#tr
 ## Prerequisites
 
 - Node.js
-- Docker (for Postgres)
+- Docker (for Postgres & Jaeger)
 
 ## Setup
 
