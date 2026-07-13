@@ -17,3 +17,22 @@ tracing visible locally. Traces are stored in-memory and lost on container resta
 Jaeger's collector/query components run separately, backed by a real storage backend
 (Elasticsearch or Cassandra are the common choices). This is a config/deployment change, not a
 code change — nothing in the app needs to know which Jaeger setup it's talking to.
+
+---
+
+## Graceful shutdown flush, verified directly (not via Windows signals)
+
+**What:** `main.ts` calls `sdk.shutdown()` on both `SIGTERM` and `SIGINT`, to flush any spans
+still sitting in the batch exporter's buffer before the process exits.
+
+**Why tested indirectly:** tried to verify this the obvious way (start the app, place an order,
+kill the process immediately, check Jaeger) but Windows doesn't reliably deliver `SIGINT`/`SIGTERM`
+to a background/non-console process the way Linux does — `taskkill` without `/F` outright refused
+("can only be terminated forcefully"). So the OS-signal path itself couldn't be exercised locally.
+
+**What we verified instead:** ran a standalone script that creates one span and calls
+`sdk.shutdown()` immediately (no wait for the batch timer), and confirmed that span *did* land in
+Jaeger. This proves `sdk.shutdown()` itself forces an immediate flush — the actual mechanism this
+whole step depends on. The `process.on('SIGTERM'/'SIGINT', ...)` wiring around it is standard Node
+and not worth re-verifying; the OS's ability to deliver those signals is a non-issue in the real
+target environment (Docker/Linux sends real `SIGTERM` on `docker stop`).

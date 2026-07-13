@@ -1,4 +1,4 @@
-import './tracing';
+import { sdk } from './tracing';
 import 'dotenv/config';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
@@ -20,3 +20,13 @@ async function bootstrap() {
   await app.listen(process.env.PORT ?? 3000);
 }
 bootstrap();
+
+async function shutdown() {
+  await sdk.shutdown();
+  process.exit(0);
+}
+
+// SIGTERM: what Docker/Kubernetes/systemd send when stopping a container in production.
+// SIGINT: what Ctrl+C sends — needed to test this locally, since Windows has no real SIGTERM.
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);
