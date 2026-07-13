@@ -4,13 +4,14 @@ A small NestJS + Prisma (Postgres) Orders API. Places an order in a single datab
 transaction (check stock → reserve stock → create order → create items → charge → confirm),
 rolling back cleanly if stock is insufficient.
 
-OpenTelemetry + Jaeger tracing is planned but not yet added — see the note at the bottom.
+Instrumented with OpenTelemetry, traces exported to Jaeger — see [Tracing](#tracing) below.
 
 ## Stack
 
 - NestJS (TypeScript)
 - Prisma 7 ORM, `@prisma/adapter-pg` driver adapter
 - Postgres (via Docker Compose)
+- OpenTelemetry SDK, traces viewed in Jaeger (via Docker Compose)
 
 ## Prerequisites
 
@@ -31,7 +32,7 @@ OpenTelemetry + Jaeger tracing is planned but not yet added — see the note at 
    cp .env.example .env
    ```
 
-3. Start Postgres:
+3. Start Postgres and Jaeger:
 
    ```bash
    docker compose up -d
@@ -77,10 +78,46 @@ curl -X POST http://localhost:3000/orders \
 If requested quantity exceeds available stock, the transaction rolls back and the request
 returns `400 Bad Request` — no partial order is ever persisted.
 
+## Tracing
+
+Every request is traced end-to-end with OpenTelemetry and exported to Jaeger.
+
+1. Jaeger UI: `http://localhost:16686` (started via `docker compose up -d`, same as Postgres).
+2. Make a request (e.g. `POST /orders` or `GET /products`).
+3. In the Jaeger UI: select **orders-api** from the Service dropdown → **Find Traces** → click
+   a trace to open the waterfall view.
+
+Span tree for a successful `POST /orders`:
+
+```
+HTTP POST /orders              (auto)
+└─ validate.request            (manual)
+   └─ order.transaction        (manual — wraps the transaction)
+      ├─ inventory.check       (manual) └─ db query (auto)
+      ├─ inventory.reserve     (manual) └─ db query (auto)
+      ├─ order.create          (manual) └─ db query (auto)
+      ├─ order.items.create    (manual) └─ db query (auto)
+      ├─ payment.charge        (manual — fake, small delay)
+      └─ order.confirm         (manual — fake)
+```
+
+On the failure path (requesting more stock than available), `inventory.check` and
+`order.transaction` both show as errored (red) spans with the exception recorded, and the
+transaction rolls back — no order is persisted.
+
+Example trace:
+
+![Jaeger trace screenshot](docs/trace-screenshot.png)
+
+See `OTEL-PLAN.md` for the full step-by-step implementation plan, and `DECISIONS.md` for notes
+on non-obvious choices made along the way (e.g. why some things had to be verified directly
+rather than assumed from docs/tutorials).
+
 ## Notes
 
 - Postgres is mapped to host port `5433` (not the default `5432`) to avoid conflicting with
   a native Postgres install — see `DATABASE_URL` in `.env.example`.
 - Prisma 7 requires a driver adapter (`@prisma/adapter-pg`) rather than reading `DATABASE_URL`
   directly at runtime; this is wired up in `src/prisma/prisma.service.ts`.
-- OpenTelemetry + Jaeger tracing has been postponed and will be added in a follow-up pass.
+- The OTel SDK is bootstrapped in `src/tracing.ts`, imported as the first line of `src/main.ts` —
+  it must run before Nest boots for auto-instrumentation to patch anything.
