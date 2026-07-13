@@ -93,21 +93,35 @@ app logs.
 
 ## Step 4 — Enable Prisma auto-instrumentation
 
-**Unverified for our setup — check this first.** `previewFeatures = ["tracing"]` is a Prisma
-5/6-era flag tied to the old `prisma-client-js` query engine binary. We're on **Prisma 7 with
-`@prisma/adapter-pg`** (a different connection architecture — see `src/prisma/prisma.service.ts`),
-and it's not confirmed that flag still does anything, or that Prisma 7 exposes query spans the
-same way.
+**Resolved.** Confirmed: `previewFeatures = ["tracing"]` no longer applies — that was a Prisma
+5/6-era flag tied to the old Rust query engine, which Prisma 7 removed entirely. The replacement
+is a standalone package, `@prisma/instrumentation`, which registers like any other OTel
+instrumentation (no `schema.prisma` change needed):
 
-Before writing any code: check the installed Prisma version's docs/changelog for how tracing
-works in v7 with driver adapters. If the old preview flag is dead, the fallback is wrapping
-`tx.<model>.<method>(...)` calls manually as part of the `inventory.check` / `order.create` etc.
-spans in Step 5 — which we're already doing, so DB visibility isn't lost even if auto-instrumentation
-for Prisma specifically doesn't pan out.
+```
+npm install @prisma/instrumentation
+```
 
-**Done when:** either `db query` spans appear automatically under the HTTP span in Jaeger for
-`GET /products`, or — if that preview flag doesn't apply to Prisma 7 — confirm manual spans still
-show query timing well enough for Step 5's purposes.
+```ts
+import { PrismaInstrumentation } from '@prisma/instrumentation';
+// added into NodeSDK's instrumentations array in src/tracing.ts:
+instrumentations: [getNodeAutoInstrumentations(), new PrismaInstrumentation()],
+```
+
+No flag on `PrismaClient` itself is needed either — it attaches by patching `PrismaClient`
+internals globally, same mechanism as the HTTP/Express auto-instrumentations.
+
+**Further finding, checked directly against the actual trace (not assumed):** pulled every span
+name for a `GET /products` trace via Jaeger's API and none contain `prisma` — the DB spans we see
+(`pg.connect`, `pg.query:SELECT ...`, `pg-pool.connect`) come from the **raw `pg` driver
+instrumentation**, already active since Step 3 (Prisma 7's adapter wraps `pg` directly).
+`@prisma/instrumentation` isn't visibly contributing anything on top of that — likely because it
+targets Prisma's old query-engine execution path, which the driver-adapter client (Prisma 7)
+doesn't use. Kept the package installed (harmless, may start working in a future Prisma release)
+but the DB visibility we actually rely on comes from the `pg` instrumentation, not this package.
+
+**Done when:** `db query` spans appear automatically under the HTTP span in Jaeger for
+`GET /products` — confirmed, via `pg.query:SELECT ...` spans.
 
 ---
 

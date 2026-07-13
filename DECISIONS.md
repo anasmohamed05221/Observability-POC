@@ -17,3 +17,22 @@ tracing visible locally. Traces are stored in-memory and lost on container resta
 Jaeger's collector/query components run separately, backed by a real storage backend
 (Elasticsearch or Cassandra are the common choices). This is a config/deployment change, not a
 code change — nothing in the app needs to know which Jaeger setup it's talking to.
+
+---
+
+## DB query spans come from `pg` auto-instrumentation, not `@prisma/instrumentation`
+
+**What:** `@prisma/instrumentation` is installed and registered in `src/tracing.ts`, but checking
+the actual span names in a real trace (via Jaeger's API) shows it contributes nothing visible.
+The `pg.connect` / `pg.query:SELECT ...` spans we see come from the plain `pg` driver
+instrumentation (already active via `getNodeAutoInstrumentations()`), since Prisma 7's
+`@prisma/adapter-pg` wraps `pg` directly.
+
+**Why this matters:** `@prisma/instrumentation` was built for Prisma's old Rust query-engine
+execution path. Prisma 7's driver-adapter client doesn't go through that path, so the package
+likely isn't hooking into anything for us. Don't assume its presence means Prisma-level tracing
+(operation name, model name, etc.) is happening — verify against real span names, same way we did
+here, before relying on it.
+
+**Kept anyway:** it's harmless to leave installed in case a future Prisma release wires it up for
+driver-adapter clients too.
