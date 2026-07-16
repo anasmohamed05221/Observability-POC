@@ -10,8 +10,10 @@ Instrumented with OpenTelemetry, traces exported to Jaeger — see [Tracing](#tr
 
 - NestJS (TypeScript)
 - Prisma 7 ORM, `@prisma/adapter-pg` driver adapter
-- Postgres (via Docker Compose)
-- OpenTelemetry SDK, traces viewed in Jaeger (via Docker Compose)
+- Postgres (via Docker Compose locally; Vercel Postgres/Neon in production)
+- OpenTelemetry SDK, traces viewed in Jaeger (via Docker Compose locally; self-hosted Jaeger on
+  Render in production)
+- Deployed on Vercel (serverless), with CI/CD via GitHub Actions + Vercel's git integration
 
 ## Prerequisites
 
@@ -113,11 +115,33 @@ See `OTEL-PLAN.md` for the full step-by-step implementation plan, and `DECISIONS
 on non-obvious choices made along the way (e.g. why some things had to be verified directly
 rather than assumed from docs/tutorials).
 
+## Deployment
+
+Live production deployment:
+
+- **API:** https://observability-poc.vercel.app
+- **Swagger UI:** https://observability-poc.vercel.app/docs
+- **Jaeger (production traces):** https://observability-poc.onrender.com
+
+App runs on Vercel as a serverless function (`api/index.ts`), backed by a Vercel Postgres/Neon
+database, with traces sent to a self-hosted Jaeger instance on Render. Local dev
+(`docker-compose.yml`, local Jaeger) is unaffected and still works exactly as described above.
+
+- **CI/CD:** pushing to `main` runs GitHub Actions (lint + test), then Vercel builds and deploys
+  automatically.
+- **Jaeger on Render:** `infra/jaeger-render/` — a custom Dockerfile running Jaeger plus a small
+  nginx reverse proxy, needed since Render's free tier only exposes one public port but Jaeger
+  needs two (OTLP ingest + UI).
+
+See `DECISIONS.md` for the reasoning behind these choices, including why this Jaeger deployment
+is deliberately ephemeral (demo-only tradeoff, not meant for real production use).
+
 ## Notes
 
 - Postgres is mapped to host port `5433` (not the default `5432`) to avoid conflicting with
   a native Postgres install — see `DATABASE_URL` in `.env.example`.
 - Prisma 7 requires a driver adapter (`@prisma/adapter-pg`) rather than reading `DATABASE_URL`
   directly at runtime; this is wired up in `src/prisma/prisma.service.ts`.
-- The OTel SDK is bootstrapped in `src/tracing.ts`, imported as the first line of `src/main.ts` —
-  it must run before Nest boots for auto-instrumentation to patch anything.
+- The OTel SDK is bootstrapped in `src/tracing.ts`, imported as the first line of `src/bootstrap.ts`
+  (shared by both `src/main.ts` and `api/index.ts`) — it must run before Express/Nest/Prisma are
+  first required for auto-instrumentation to patch anything.
