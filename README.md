@@ -4,7 +4,16 @@ A small NestJS + Prisma (Postgres) Orders API. Places an order in a single datab
 transaction (check stock → reserve stock → create order → create items → charge → confirm),
 rolling back cleanly if stock is insufficient.
 
-Instrumented with OpenTelemetry, traces exported to Jaeger — see [Tracing](#tracing) below.
+Instrumented with OpenTelemetry, traces exported to Jaeger — see [Tracing](#local-tracing-jaeger)
+below.
+
+## Live Deployment
+
+- **API:** https://observability-poc.vercel.app
+- **Swagger UI:** https://observability-poc.vercel.app/docs
+- **Jaeger (production traces):** https://observability-poc.onrender.com
+
+See [Production Deployment](#production-deployment) below for how this is put together.
 
 ## Stack
 
@@ -15,12 +24,12 @@ Instrumented with OpenTelemetry, traces exported to Jaeger — see [Tracing](#tr
   Render in production)
 - Deployed on Vercel (serverless), with CI/CD via GitHub Actions + Vercel's git integration
 
-## Prerequisites
+## Prerequisites (local development)
 
 - Node.js
 - Docker (for Postgres & Jaeger)
 
-## Setup
+## Local Setup
 
 1. Install dependencies:
 
@@ -63,13 +72,15 @@ Instrumented with OpenTelemetry, traces exported to Jaeger — see [Tracing](#tr
 
 ## Endpoints
 
+Applies to both local (`http://localhost:3000`) and production (see [Live Deployment](#live-deployment) above) — same API either way.
+
 | Method | Path | Description |
 |---|---|---|
 | `POST` | `/orders` | Place an order (transaction: check stock → reserve → create order → create items → charge → confirm) |
 | `GET` | `/orders/:id` | Read an order back, including its items |
 | `GET` | `/products` | List products |
 
-Example request:
+Example request (against local dev; swap in the production URL to hit the live deployment):
 
 ```bash
 curl -X POST http://localhost:3000/orders \
@@ -80,12 +91,14 @@ curl -X POST http://localhost:3000/orders \
 If requested quantity exceeds available stock, the transaction rolls back and the request
 returns `400 Bad Request` — no partial order is ever persisted.
 
-## Tracing
+## Local Tracing (Jaeger)
 
-Every request is traced end-to-end with OpenTelemetry and exported to Jaeger.
+Every request is traced end-to-end with OpenTelemetry and exported to Jaeger. This section
+covers **local dev**, using the Jaeger container from `docker-compose.yml` — for how production
+tracing is set up (self-hosted Jaeger on Render), see [Production Deployment](#production-deployment).
 
 1. Jaeger UI: `http://localhost:16686` (started via `docker compose up -d`, same as Postgres).
-2. Make a request (e.g. `POST /orders` or `GET /products`).
+2. Make a request (e.g. `POST /orders` or `GET /products`) against `http://localhost:3000`.
 3. In the Jaeger UI: select **orders-api** from the Service dropdown → **Find Traces** → click
    a trace to open the waterfall view.
 
@@ -105,7 +118,8 @@ HTTP POST /orders              (auto)
 
 On the failure path (requesting more stock than available), `inventory.check` and
 `order.transaction` both show as errored (red) spans with the exception recorded, and the
-transaction rolls back — no order is persisted.
+transaction rolls back — no order is persisted. Same behavior in production, viewed on the
+Render-hosted Jaeger instance instead.
 
 Example trace:
 
@@ -115,17 +129,12 @@ See `OTEL-PLAN.md` for the full step-by-step implementation plan, and `DECISIONS
 on non-obvious choices made along the way (e.g. why some things had to be verified directly
 rather than assumed from docs/tutorials).
 
-## Deployment
+## Production Deployment
 
-Live production deployment:
-
-- **API:** https://observability-poc.vercel.app
-- **Swagger UI:** https://observability-poc.vercel.app/docs
-- **Jaeger (production traces):** https://observability-poc.onrender.com
-
-App runs on Vercel as a serverless function (`api/index.ts`), backed by a Vercel Postgres/Neon
-database, with traces sent to a self-hosted Jaeger instance on Render. Local dev
-(`docker-compose.yml`, local Jaeger) is unaffected and still works exactly as described above.
+App runs on **Vercel** as a serverless function (`api/index.ts`), backed by a **Vercel
+Postgres/Neon** database, with traces sent to a **self-hosted Jaeger instance on Render**. Local
+dev (`docker-compose.yml`, local Jaeger, described above) is a completely separate setup and is
+unaffected by any of this.
 
 - **CI/CD:** pushing to `main` runs GitHub Actions (lint + test), then Vercel builds and deploys
   automatically.
@@ -138,8 +147,11 @@ is deliberately ephemeral (demo-only tradeoff, not meant for real production use
 
 ## Notes
 
+**Local dev only:**
 - Postgres is mapped to host port `5433` (not the default `5432`) to avoid conflicting with
   a native Postgres install — see `DATABASE_URL` in `.env.example`.
+
+**Applies to both local and production:**
 - Prisma 7 requires a driver adapter (`@prisma/adapter-pg`) rather than reading `DATABASE_URL`
   directly at runtime; this is wired up in `src/prisma/prisma.service.ts`.
 - The OTel SDK is bootstrapped in `src/tracing.ts`, imported as the first line of `src/bootstrap.ts`
