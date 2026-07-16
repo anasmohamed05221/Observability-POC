@@ -1,6 +1,6 @@
 // Must be the first import: OpenTelemetry's auto-instrumentation can only patch
 // express/http/Prisma if it registers before any of those modules are first required.
-import { provider } from './tracing';
+import './tracing';
 import express from 'express';
 import { NestFactory } from '@nestjs/core';
 import { ExpressAdapter } from '@nestjs/platform-express';
@@ -23,19 +23,6 @@ export async function createApp(server: express.Express) {
     .build();
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('docs', app, document);
-
-  app.use(
-    (
-      _req: express.Request,
-      res: express.Response,
-      next: express.NextFunction,
-    ) => {
-      res.on('finish', () => {
-        void provider.forceFlush();
-      });
-      next();
-    },
-  );
 
   await app.init();
   return app;

@@ -7,19 +7,31 @@ import type { IncomingMessage, ServerResponse } from 'http';
 // bootstrap.ts imports first), and OTel's auto-instrumentation can only patch
 // express/http/Prisma if it registers before any of those modules are first required.
 import { createApp } from '../dist/src/bootstrap';
+import { provider } from '../dist/src/tracing';
 import express from 'express';
 
-// Built once, immediately when this module loads (cold start) — not lazily on the
-// first request. Building it lazily meant app construction (Express/Nest setup) ran
-// tangled up with that first request's span, so traces sometimes got mis-rooted under
-// an internal setup span instead of the actual request.
-const serverPromise = (async () => {
-  const server = express();
-  await createApp(server);
-  return server;
-})();
+let cachedServer: express.Express | undefined;
+
+async function getServer() {
+  if (!cachedServer) {
+    cachedServer = express();
+    await createApp(cachedServer);
+  }
+  return cachedServer;
+}
 
 export default async function handler(req: IncomingMessage, res: ServerResponse) {
-  const server = await serverPromise;
-  server(req, res);
+  const server = await getServer();
+
+  // Vercel freezes the function once this handler's returned promise resolves — not
+  // once the HTTP response is sent. Express doesn't return a promise for that, so
+  // without this, we'd return (and risk a freeze) before the response — and the trace
+  // flush below — actually finish.
+  await new Promise<void>((resolve, reject) => {
+    res.on('finish', resolve);
+    res.on('error', reject);
+    server(req, res);
+  });
+
+  await provider.forceFlush();
 }
