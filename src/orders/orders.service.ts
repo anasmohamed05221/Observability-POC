@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { SpanStatusCode } from '@opentelemetry/api';
 import { PrismaService } from '../prisma/prisma.service';
@@ -17,13 +21,25 @@ export class OrdersService {
       try {
         return await this.prisma.$transaction(async (tx) => {
           let total = 0;
-          const itemsToCreate: { productId: number; quantity: number; unitPrice: Prisma.Decimal }[] = [];
+          const itemsToCreate: {
+            productId: number;
+            quantity: number;
+            unitPrice: Prisma.Decimal;
+          }[] = [];
 
           for (const item of dto.items) {
-            const product = await this.checkStock(tx, item.productId, item.quantity);
+            const product = await this.checkStock(
+              tx,
+              item.productId,
+              item.quantity,
+            );
             await this.reserveStock(tx, item.productId, item.quantity);
             total += Number(product.price) * item.quantity;
-            itemsToCreate.push({ productId: item.productId, quantity: item.quantity, unitPrice: product.price });
+            itemsToCreate.push({
+              productId: item.productId,
+              quantity: item.quantity,
+              unitPrice: product.price,
+            });
           }
           span.setAttribute('order.total', total);
 
@@ -48,7 +64,9 @@ export class OrdersService {
       span.setAttribute('product.id', productId);
       span.setAttribute('inventory.requested_qty', quantity);
       try {
-        const product = await tx.product.findUnique({ where: { id: productId } });
+        const product = await tx.product.findUnique({
+          where: { id: productId },
+        });
         if (!product) {
           throw new NotFoundException(`Product ${productId} not found`);
         }
@@ -92,7 +110,9 @@ export class OrdersService {
     return tracer.startActiveSpan('order.create', async (span) => {
       span.setAttribute('order.total', total);
       try {
-        const order = await tx.order.create({ data: { status: 'pending', total } });
+        const order = await tx.order.create({
+          data: { status: 'pending', total },
+        });
         span.setAttribute('order.id', order.id);
         return order;
       } catch (err) {

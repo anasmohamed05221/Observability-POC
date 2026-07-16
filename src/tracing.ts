@@ -7,7 +7,9 @@ import { resourceFromAttributes } from '@opentelemetry/resources';
 import { ATTR_SERVICE_NAME } from '@opentelemetry/semantic-conventions';
 import { PrismaInstrumentation } from '@prisma/instrumentation';
 
-const otlpUrl = process.env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT ?? 'http://localhost:4318/v1/traces';
+const otlpUrl =
+  process.env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT ??
+  'http://localhost:4318/v1/traces';
 
 // OTEL_EXPORTER_OTLP_HEADERS is a comma-separated "key=value" list, percent-encoded per the
 // OTel spec (e.g. Grafana Cloud's copy-paste value uses %20 for the space in "Basic <token>").
@@ -32,7 +34,10 @@ const provider = new NodeTracerProvider({
 provider.register();
 
 registerInstrumentations({
-  instrumentations: [getNodeAutoInstrumentations(), new PrismaInstrumentation()],
+  instrumentations: [
+    getNodeAutoInstrumentations(),
+    new PrismaInstrumentation(),
+  ],
 });
 
 export { provider };

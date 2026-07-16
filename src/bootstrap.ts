@@ -8,22 +8,32 @@ import { provider } from './tracing';
 
 export async function createApp(server: express.Express) {
   const app = await NestFactory.create(AppModule, new ExpressAdapter(server));
-  app.useGlobalPipes(new TracedValidationPipe({ whitelist: true, transform: true }));
+  app.useGlobalPipes(
+    new TracedValidationPipe({ whitelist: true, transform: true }),
+  );
 
   const config = new DocumentBuilder()
     .setTitle('Orders API')
-    .setDescription('Orders API with a single Prisma transaction (check stock → reserve → create order → create items → charge → confirm)')
+    .setDescription(
+      'Orders API with a single Prisma transaction (check stock → reserve → create order → create items → charge → confirm)',
+    )
     .setVersion('1.0')
     .build();
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('docs', app, document);
 
-  app.use((_req, res, next) => {
-    res.on('finish', () => {
-      void provider.forceFlush();
-    });
-    next();
-  });
+  app.use(
+    (
+      _req: express.Request,
+      res: express.Response,
+      next: express.NextFunction,
+    ) => {
+      res.on('finish', () => {
+        void provider.forceFlush();
+      });
+      next();
+    },
+  );
 
   await app.init();
   return app;
