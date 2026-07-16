@@ -20,9 +20,33 @@ code change — nothing in the app needs to know which Jaeger setup it's talking
 
 ---
 
+## Deployment: Vercel (app) + Neon (DB) + Render (Jaeger)
+
+**What:** App runs on Vercel as a serverless function. DB is Vercel Postgres (Neon). Traces go to
+a self-hosted Jaeger `all-in-one` on Render.
+
+**Why a custom Dockerfile + nginx, instead of just deploying the stock Jaeger image:** Jaeger
+needs two ports — `4318` (OTLP ingest) and `16686` (UI) — but Render's free Web Service tier only
+exposes one public port per service. `infra/jaeger-render/Dockerfile` copies Jaeger's binary into
+an `nginx:alpine` base and runs both processes in one container; nginx listens on the one exposed
+port and routes by path (`/v1/traces` → Jaeger, everything else → its UI), so both stay reachable
+through that single port.
+
+**Why serverless changed the tracing code:** Vercel functions can freeze right after sending a
+response, with no guaranteed shutdown hook. Traces are now flushed explicitly per-request instead
+of on shutdown, and the handler awaits both the response finishing and the flush completing
+before returning — otherwise Vercel could freeze mid-export, losing whichever span (often the
+request's own root span) hadn't finished sending yet.
+
+**Why this Jaeger deployment is ephemeral on purpose:** Render's free tier has no persistent
+disk, so traces reset on restart. Accepted as a demo-only tradeoff — real production would run
+this on a VPS with real storage, per the original brief.
+
+---
+
 ## Graceful shutdown flush, verified directly (not via Windows signals)
 
-**What:** `main.ts` calls `sdk.shutdown()` on both `SIGTERM` and `SIGINT`, to flush any spans
+**What:** `main.ts` calls `provider.shutdown()` on both `SIGTERM` and `SIGINT`, to flush any spans
 still sitting in the batch exporter's buffer before the process exits.
 
 **Why tested indirectly:** tried to verify this the obvious way (start the app, place an order,
@@ -31,8 +55,8 @@ to a background/non-console process the way Linux does — `taskkill` without `/
 ("can only be terminated forcefully"). So the OS-signal path itself couldn't be exercised locally.
 
 **What we verified instead:** ran a standalone script that creates one span and calls
-`sdk.shutdown()` immediately (no wait for the batch timer), and confirmed that span *did* land in
-Jaeger. This proves `sdk.shutdown()` itself forces an immediate flush — the actual mechanism this
+`provider.shutdown()` immediately (no wait for the batch timer), and confirmed that span *did* land in
+Jaeger. This proves `provider.shutdown()` itself forces an immediate flush — the actual mechanism this
 whole step depends on. The `process.on('SIGTERM'/'SIGINT', ...)` wiring around it is standard Node
 and not worth re-verifying; the OS's ability to deliver those signals is a non-issue in the real
 target environment (Docker/Linux sends real `SIGTERM` on `docker stop`).
