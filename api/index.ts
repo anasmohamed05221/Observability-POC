@@ -9,17 +9,17 @@ import type { IncomingMessage, ServerResponse } from 'http';
 import { createApp } from '../dist/src/bootstrap';
 import express from 'express';
 
-let cachedServer: express.Express | undefined;
-
-async function getServer() {
-  if (!cachedServer) {
-    cachedServer = express();
-    await createApp(cachedServer);
-  }
-  return cachedServer;
-}
+// Built once, immediately when this module loads (cold start) — not lazily on the
+// first request. Building it lazily meant app construction (Express/Nest setup) ran
+// tangled up with that first request's span, so traces sometimes got mis-rooted under
+// an internal setup span instead of the actual request.
+const serverPromise = (async () => {
+  const server = express();
+  await createApp(server);
+  return server;
+})();
 
 export default async function handler(req: IncomingMessage, res: ServerResponse) {
-  const server = await getServer();
+  const server = await serverPromise;
   server(req, res);
 }
