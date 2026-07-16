@@ -1,4 +1,9 @@
 {
   "outputDirectory": "public",
-  "rewrites": [{ "source": "/(.*)", "destination": "/api/index" }]
+  "rewrites": [{ "source": "/(.*)", "destination": "/api/index" }],
+  "functions": {
+    "api/index.ts": {
+      "includeFiles": "node_modules/swagger-ui-dist/**"
+    }
+  }
 }
