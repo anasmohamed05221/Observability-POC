@@ -1,10 +1,12 @@
+// Must be the first import: OpenTelemetry's auto-instrumentation can only patch
+// express/http/Prisma if it registers before any of those modules are first required.
+import { provider } from './tracing';
 import express from 'express';
 import { NestFactory } from '@nestjs/core';
 import { ExpressAdapter } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import { TracedValidationPipe } from './otel/traced-validation.pipe';
-import { provider } from './tracing';
 
 export async function createApp(server: express.Express) {
   const app = await NestFactory.create(AppModule, new ExpressAdapter(server));

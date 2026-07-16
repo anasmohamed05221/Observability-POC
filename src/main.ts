@@ -1,7 +1,7 @@
+import { provider } from './tracing';
 import 'dotenv/config';
 import express from 'express';
 import { createApp } from './bootstrap';
-import { provider } from './tracing';
 
 async function bootstrap() {
   const server = express();
